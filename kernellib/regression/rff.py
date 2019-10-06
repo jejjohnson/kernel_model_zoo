@@ -3,6 +3,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.kernel_approximation import RBFSampler
 from sklearn.kernel_ridge import KernelRidge
+from sklearn.svm import LinearSVR
 
 
 class RFFRegression(BaseEstimator, RegressorMixin):
@@ -50,12 +51,23 @@ class RFFRegression(BaseEstimator, RegressorMixin):
 
 class RFFSVR(BaseEstimator, RegressorMixin):
     def __init__(
-        self, n_components=10, gamma=1.0, alpha=1.0, krr_kwargs=None, random_state=None
+        self,
+        n_components=10,
+        gamma=1.0,
+        epsilon=0.0,
+        C=1.0,
+        tol=1e-4,
+        loss="epsilon_insensitive",
+        svr_kwargs=None,
+        random_state=None,
     ):
         self.n_components = n_components
         self.gamma = gamma
-        self.alpha = alpha
-        self.krr_kwargs = krr_kwargs
+        self.epsilon = epsilon
+        self.C = C
+        self.tol = tol
+        self.loss = loss
+        self.svr_kwargs = svr_kwargs
         self.random_state = random_state
 
     def fit(self, X, y):
@@ -71,12 +83,14 @@ class RFFSVR(BaseEstimator, RegressorMixin):
                     ),
                 ),
                 (
-                    "krr",
-                    KernelRidge(
-                        alpha=self.alpha,
-                        kernel="linear",
-                        gamma=None,
-                        kernel_params=None,
+                    "svr",
+                    LinearSVR(
+                        epsilon=self.epsilon,
+                        C=self.C,
+                        tol=self.tol,
+                        loss=self.loss,
+                        **self.svr_kwargs,
+                        random_state=self.random_state
                     ),
                 ),
             ]
