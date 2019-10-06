@@ -1,5 +1,5 @@
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import SGDRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.kernel_approximation import RBFSampler
 from sklearn.kernel_ridge import KernelRidge
@@ -90,7 +90,7 @@ class RFFSVR(BaseEstimator, RegressorMixin):
                         tol=self.tol,
                         loss=self.loss,
                         **self.svr_kwargs,
-                        random_state=self.random_state
+                        random_state=self.random_state,
                     ),
                 ),
             ]
@@ -99,6 +99,38 @@ class RFFSVR(BaseEstimator, RegressorMixin):
         # fit LR model
         self.pipeline.fit(X, y)
 
+        return self
+
+    def predict(self, X):
+        return self.pipeline.predict(X)
+
+
+class RFFSGD(BaseEstimator, RegressorMixin):
+    def __init__(self, n_components=10, gamma=1.0, random_state=123, sgd_kwargs=None):
+
+        self.n_components = n_components
+        self.gamma = gamma
+        self.random_state = random_state
+        self.sgd_kwargs = sgd_kwargs
+
+    def fit(self, X, y):
+        # fit RFF Model
+        self.pipeline = Pipeline(
+            [
+                (
+                    "rff",
+                    RBFSampler(
+                        n_components=self.n_components,
+                        gamma=self.gamma,
+                        random_state=self.random_state,
+                    ),
+                ),
+                ("sgd", SGDRegressor(**self.sgd_kwargs)),
+            ]
+        )
+
+        # fit LR model
+        self.pipeline.fit(X, y)
         return self
 
     def predict(self, X):
