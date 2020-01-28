@@ -8,7 +8,7 @@ from sklearn.utils import check_random_state
 from sklearn.utils import check_array
 from scipy.spatial.distance import pdist
 from scipy import stats
-from models.kernel import estimate_sigma, get_param_grid, sigma_to_gamma
+from ..kernels.utils import estimate_sigma, get_param_grid, sigma_to_gamma
 
 
 class HSIC(BaseEstimator):
@@ -31,11 +31,16 @@ class HSIC(BaseEstimator):
         order to pass a precomputed kernel matrix to the estimator
         methods instead of samples.
     
-    gamma : float, default=None
+    gamma_X : float, default=None
         Gamma parameter for the RBF, laplacian, polynomial, exponential chi2
-        and sigmoid kernels. Interpretation of the default value is left to
-        the kernel; see the documentation for sklearn.metrics.pairwise.
+        and sigmoid kernels. Used only by the X parameter. 
+        Interpretation of the default value is left to the kernel; 
+        see the documentation for sklearn.metrics.pairwise.
         Ignored by other kernels.
+
+    gamma_Y : float, default=None
+        The same gamma parameter as the X. If None, the same gamma_X will be
+        used for the Y.
     
     degree : float, default=3
         Degree of the polynomial kernel. Ignored by other kernels.
@@ -79,7 +84,8 @@ class HSIC(BaseEstimator):
 
     def __init__(
         self,
-        gamma: float = 1.0,
+        gamma_X: float = 1.0,
+        gamma_Y: Optional[None] = None,
         kernel: Union[Callable, str] = "rbf",
         degree: float = 3,
         coef0: float = 1,
@@ -89,7 +95,8 @@ class HSIC(BaseEstimator):
         subsample: Optional[int] = None,
         bias: bool = True,
     ):
-        self.gamma = gamma
+        self.gamma_X = gamma_X
+        self.gamma_Y = gamma_Y
         self.kernel = kernel
         self.degree = degree
         self.coef0 = coef0
@@ -122,8 +129,8 @@ class HSIC(BaseEstimator):
         self.Y_train_ = Y
 
         # Calculate Kernel Matrices
-        K_x = self.compute_kernel(X)
-        K_y = self.compute_kernel(Y)
+        K_x = self.compute_kernel(X, gamma=self.gamma_X)
+        K_y = self.compute_kernel(Y, gamma=self.gamma_Y)
 
         # Center Kernel
         # H = np.eye(n_samples) - (1 / n_samples) * np.ones(n_samples)
@@ -137,11 +144,11 @@ class HSIC(BaseEstimator):
 
         return self
 
-    def compute_kernel(self, X, Y=None):
+    def compute_kernel(self, X, Y=None, gamma=1.0):
         if callable(self.kernel):
             params = self.kernel_params or {}
         else:
-            params = {"gamma": self.gamma, "degree": self.degree, "coef0": self.coef0}
+            params = {"gamma": gamma, "degree": self.degree, "coef0": self.coef0}
         return pairwise_kernels(X, Y, metric=self.kernel, filter_params=True, **params)
 
     @property
@@ -158,9 +165,9 @@ class HSIC(BaseEstimator):
         elif self.scorer == "hsic":
 
             if self.bias:
-                self.hsic_bias = 1 / (self.n_samples ** 2)
-            else:
                 self.hsic_bias = 1 / (self.n_samples - 1) ** 2
+            else:
+                self.hsic_bias = 1 / (self.n_samples ** 2)
 
             return self.hsic_bias * np.sum(K_x * K_y)
         else:
@@ -175,14 +182,48 @@ class HSIC(BaseEstimator):
         return self.hsic_value
 
 
+def get_gamma_init(
+    X: np.ndarray, Y: np.ndarray, method: str, percent: Optional[float] = None
+) -> float:
+    """Get Gamma initializer
+    
+    Parameters
+    ----------
+    method : str,
+        the initialization method
+        
+    percent : float
+        if using the Belkin method, this uses a percentage
+        of the kth nearest neighbour
+    
+    Returns
+    -------
+    gamma_init : float
+        the initial gamma value
+    """
+
+    # initialize sigma
+    sigma_init_X = estimate_sigma(X, method=method, percent=percent)
+    sigma_init_Y = estimate_sigma(Y, method=method, percent=percent)
+
+    # mean of the two
+    sigma_init = np.mean([sigma_init_X, sigma_init_Y])
+
+    # convert sigma to gamma
+    gamma_init = sigma_to_gamma(sigma_init)
+
+    # return initial gamma value
+    return gamma_init
+
+
 def train_rbf_hsic(
     X: np.ndarray,
     Y: np.ndarray,
-    clf_hsic: BaseEstimator,
+    scorer: str = "ckta",
     n_gamma: int = 100,
     factor: int = 1,
     sigma_est: str = "mean",
-    verbose=None,
+    verbose=0,
     n_jobs=-1,
     cv=2,
 ) -> dict:
@@ -200,6 +241,13 @@ def train_rbf_hsic(
     gammas = sigma_to_gamma(sigmas)
     init_gamma = sigma_to_gamma(init_sigma)
     param_grid = {"gamma": gammas}
+
+    # Get HSIC model
+    clf_hsic = HSIC(
+        gamma=init_gamma, kernel="rbf", scorer=scorer, subsample=None, bias=True
+    )
+
+    # print(n_jobs, verbose)
 
     clf_grid = GridSearchCV(
         clf_hsic, param_grid, iid=False, n_jobs=n_jobs, verbose=verbose, cv=cv
@@ -275,3 +323,4 @@ def kernel_alignment(K_x: np.array, K_y: np.array, center: bool = False) -> floa
 
     # target kernel alignment
     return np.sum(K_x * K_y) / np.linalg.norm(K_x) / np.linalg.norm(K_y)
+
